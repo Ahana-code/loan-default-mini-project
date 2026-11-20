@@ -1,4 +1,5 @@
 import pandas as pd
+import joblib
 from sklearn.model_selection import train_test_split
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -6,7 +7,7 @@ from config import *
 
 
 def load_data():
-    # Read only the columns we need; this also avoids loading empty columns
+    # Read only the columns we need
     df = pd.read_csv(DATA_RAW, low_memory=False,
                      usecols=APPLICATION_FEATURES + ["loan_status"])
     # Keep only loans with a known final outcome
@@ -19,7 +20,7 @@ def load_data():
 
 
 def split_data(df):
-    X = df[APPLICATION_FEATURES]
+    X = df[APPLICATION_FEATURES].copy()
     y = df["loan_default"]
     # Stratified split keeps the Charged Off share the same in both sets
     return train_test_split(X, y, test_size=TEST_SIZE,
@@ -28,38 +29,56 @@ def split_data(df):
 
 def clean_and_encode(X_train, X_test):
     X_train, X_test = X_train.copy(), X_test.copy()
+
     num_cols = X_train.select_dtypes(include="number").columns.tolist()
     cat_cols = X_train.select_dtypes(include="object").columns.tolist()
 
-    # Fill blanks using TRAINING statistics only
-    num_imp = SimpleImputer(strategy="median").fit(X_train[num_cols])
-    cat_imp = SimpleImputer(strategy="most_frequent").fit(X_train[cat_cols])
-    X_train[num_cols] = num_imp.transform(X_train[num_cols])
-    X_test[num_cols] = num_imp.transform(X_test[num_cols])
-    X_train[cat_cols] = cat_imp.transform(X_train[cat_cols])
-    X_test[cat_cols] = cat_imp.transform(X_test[cat_cols])
+    num_imputer = SimpleImputer(strategy="median")
+    cat_imputer = SimpleImputer(strategy="most_frequent")
 
-    # Encoder and scaler also learn from TRAINING data only
-    enc = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
-    enc.fit(X_train[cat_cols])
-    scaler = StandardScaler().fit(X_train[num_cols])
+    # Fit on training data only, then apply the same rules to test data
+    X_train[num_cols] = num_imputer.fit_transform(X_train[num_cols])
+    X_test[num_cols] = num_imputer.transform(X_test[num_cols])
 
-    def transform(X_part):
-        cat = pd.DataFrame(enc.transform(X_part[cat_cols]),
-                           index=X_part.index,
-                           columns=enc.get_feature_names_out(cat_cols))
-        num = pd.DataFrame(scaler.transform(X_part[num_cols]),
-                           index=X_part.index, columns=num_cols)
-        return pd.concat([num, cat], axis=1)
+    X_train[cat_cols] = cat_imputer.fit_transform(X_train[cat_cols])
+    X_test[cat_cols] = cat_imputer.transform(X_test[cat_cols])
 
-    return transform(X_train), transform(X_test)
+    encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+    scaler = StandardScaler()
+
+    train_cat = encoder.fit_transform(X_train[cat_cols])
+    test_cat = encoder.transform(X_test[cat_cols])
+    columns = encoder.get_feature_names_out(cat_cols)
+
+    X_train_final = pd.concat([
+        pd.DataFrame(scaler.fit_transform(X_train[num_cols]),
+                     columns=num_cols, index=X_train.index),
+        pd.DataFrame(train_cat, columns=columns, index=X_train.index)
+    ], axis=1)
+
+    X_test_final = pd.concat([
+        pd.DataFrame(scaler.transform(X_test[num_cols]),
+                     columns=num_cols, index=X_test.index),
+        pd.DataFrame(test_cat, columns=columns, index=X_test.index)
+    ], axis=1)
+
+    preprocessors = {
+        "num_imputer": num_imputer,
+        "cat_imputer": cat_imputer,
+        "encoder": encoder,
+        "scaler": scaler,
+        "num_cols": num_cols,
+        "cat_cols": cat_cols,
+    }
+    return X_train_final, X_test_final, preprocessors
 
 
 def quality_check(X_train, X_test, y_train, y_test):
     checks = {
-        "No blanks": X_train.isnull().sum().sum() == 0 and X_test.isnull().sum().sum() == 0,
-        "Columns match": list(X_train.columns) == list(X_test.columns),
+        "No missing values": X_train.isnull().sum().sum() == 0 and X_test.isnull().sum().sum() == 0,
+        "Columns match": X_train.columns.equals(X_test.columns),
         "Split about 80/20": 15 <= len(X_test) / (len(X_train) + len(X_test)) * 100 <= 25,
+        "Rows match labels": len(X_train) == len(y_train) and len(X_test) == len(y_test),
         "Class balance similar": abs(y_train.mean() - y_test.mean()) * 100 <= 1.0,
     }
     for name, ok in checks.items():
@@ -71,13 +90,17 @@ def quality_check(X_train, X_test, y_train, y_test):
 if __name__ == "__main__":
     df = load_data()
     print("Rows after filtering:", len(df))
+
     X_train, X_test, y_train, y_test = split_data(df)
-    X_train_final, X_test_final = clean_and_encode(X_train, X_test)
+    X_train_final, X_test_final, preprocessors = clean_and_encode(X_train, X_test)
     quality_check(X_train_final, X_test_final, y_train, y_test)
 
-    # Save so the next files can load them without repeating this step
+    # Save processed data for the next scripts
     X_train_final.to_csv(PROCESSED / "X_train.csv", index=False)
     X_test_final.to_csv(PROCESSED / "X_test.csv", index=False)
     y_train.to_csv(PROCESSED / "y_train.csv", index=False)
     y_test.to_csv(PROCESSED / "y_test.csv", index=False)
-    print("Saved processed data to data/processed/")
+
+    # Save the fitted preprocessors so new loans can be processed the same way
+    joblib.dump(preprocessors, RESULTS / "preprocessors.pkl")
+    print("Saved processed data and preprocessors.")
