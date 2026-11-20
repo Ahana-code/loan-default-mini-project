@@ -5,6 +5,12 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from config import *
 
+# Objective 1: explore the raw data
+raw = pd.read_csv(DATA_RAW, low_memory=False, nrows=5000)
+print("Raw data shape (sample):", raw.shape)
+print("Missing values (top 10 columns):")
+print(raw.isnull().sum().sort_values(ascending=False).head(10))
+
 
 def load_data():
     # Read only the columns we need
@@ -17,6 +23,8 @@ def load_data():
     if SAMPLE_SIZE:
         df = df.sample(n=SAMPLE_SIZE, random_state=RANDOM_STATE)
     return df
+    print("Loan status distribution:")
+    print(df["loan_status"].value_counts())
 
 
 def split_data(df):
@@ -86,21 +94,24 @@ def quality_check(X_train, X_test, y_train, y_test):
     if not all(checks.values()):
         raise SystemExit("Quality checks failed. Fix preprocessing before continuing.")
 
-
 if __name__ == "__main__":
     df = load_data()
     print("Rows after filtering:", len(df))
+
+    print("\nLoan status distribution:")
+    print(df["loan_status"].value_counts())
+
+    print("\nMissing values in the 18 input features:")
+    print(df[APPLICATION_FEATURES].isnull().sum())
 
     X_train, X_test, y_train, y_test = split_data(df)
     X_train_final, X_test_final, preprocessors = clean_and_encode(X_train, X_test)
     quality_check(X_train_final, X_test_final, y_train, y_test)
 
-    # Save processed data for the next scripts
     X_train_final.to_csv(PROCESSED / "X_train.csv", index=False)
     X_test_final.to_csv(PROCESSED / "X_test.csv", index=False)
     y_train.to_csv(PROCESSED / "y_train.csv", index=False)
     y_test.to_csv(PROCESSED / "y_test.csv", index=False)
 
-    # Save the fitted preprocessors so new loans can be processed the same way
     joblib.dump(preprocessors, RESULTS / "preprocessors.pkl")
     print("Saved processed data and preprocessors.")
