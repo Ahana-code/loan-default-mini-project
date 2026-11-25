@@ -31,7 +31,7 @@ def ask_choice(label, column):
 def fill_form():
     print("=== NEW LOAN APPLICATION ===")
     applicant = {
-        "loan_amnt":           ask_number("Loan amount (Rs/$)", 500, 40000),
+        "loan_amnt":           ask_number("Loan amount (Rs/$)", 500, 400000),
         "term":                ask_choice("Loan term", "term"),
         "emp_length":          ask_choice("Years in current job", "emp_length"),
         "home_ownership":      ask_choice("Home ownership", "home_ownership"),
