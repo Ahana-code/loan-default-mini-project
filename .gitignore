@@ -2,3 +2,4 @@ data/
 results/
 __pycache__/
 *.pkl
+applications_log.csv
