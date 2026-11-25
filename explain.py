@@ -63,6 +63,8 @@ def explain(applicant):
 def assess(applicant):
     proba, contrib = explain(applicant)
     decision = "FLAG FOR REVIEW (higher risk)" if proba >= THRESHOLD else "LOW RISK (eligible)"
+    if applicant["fico_range_low"] < 625:
+        print("WARNING: FICO below 625 is rare in the training data. Verify this value.")
 
     print("=" * 55)
     print(f"Default risk probability: {proba:.1%}")
